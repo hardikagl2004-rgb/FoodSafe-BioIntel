@@ -1242,9 +1242,10 @@ c2.metric("Risk Category", row["Risk"])
 c3.metric("K-Means Cluster", f"#{int(row['KMeans_Cluster'])}")
 st.markdown("<br>", unsafe_allow_html=True)
 
-tab_community, tab_overview, tab_biology, tab_risk, tab_cluster, tab_compare, tab_model, tab_manual = st.tabs(
-    ["🍽️ Community Guide", "📋 Overview", "🧬 Genomics & Biology", "📊 FPRI Breakdown",
-     "🌐 Clustering", "⚖️ Compare All Pathogens", "🤖 Model Details", "📖 Manual & Sources"]
+tab_community, tab_try, tab_overview, tab_biology, tab_risk, tab_cluster, tab_compare, tab_model, tab_manual = st.tabs(
+    ["🍽️ Community Guide", "🧪 Try the Model", "📋 Overview", "🧬 Genomics & Biology",
+     "📊 FPRI Breakdown", "🌐 Clustering", "⚖️ Compare All Pathogens", "🤖 Model Details",
+     "📖 Manual & Sources"]
 )
 
 # --- Community Guide tab (plain language, for everyone) --------------------
@@ -1568,46 +1569,57 @@ with tab_compare:
     download_df_button(elbow_sil_df, "Elbow & silhouette data (all k values)",
                         "elbow_silhouette_data.csv", key="dl_elbow_sil")
 
-# --- Model Details tab -----------------------------------------------------
-with tab_model:
-    st.info(
-        "🎓 **In simple terms:** this app takes each germ's 5 risk scores, "
-        "puts similar germs into the same group automatically (no human labeling), "
-        "and shows you *why* it grouped them that way. For a plain-language "
-        "explanation of what each group actually means, see the **🌐 Clustering** tab — "
-        "everything below is the full technical detail behind that, useful for "
-        "research/coursework but optional for everyday reading."
-    )
-
-    st.markdown("## 🧪 Try the Models Live — right here, no download needed")
-    st.caption(
-        "These sliders run the **actual trained models** used everywhere else in this "
-        "dashboard (not a lookalike demo) — try it with an existing pathogen's exact "
-        "scores and it will reproduce that pathogen's real cluster every time."
+# --- Try the Model tab (the main, no-jargon way for ANYONE to use the AI) --
+with tab_try:
+    st.markdown("## 🧪 Try the Real AI Model — right here, free, no download, no code")
+    st.success(
+        "👋 **This works for anyone, whatever your background.** Just move the 5 sliders "
+        "below. You're not looking at a demo or a mockup — these sliders are wired "
+        "directly to the same trained model used everywhere else in this app."
     )
 
     default_row = row  # pre-fill with the currently selected pathogen's own scores
+    st.caption("Each slider is a score from 0 (lowest) to 100 (highest). They're pre-filled "
+               f"with **{default_row['name']}**'s own values — try moving them around.")
     sc1, sc2, sc3, sc4, sc5 = st.columns(5)
     with sc1:
-        in_V = st.slider("Virulence (V)", 0, 100, int(default_row["V"]))
+        in_V = st.slider("Virulence (V)", 0, 100, int(default_row["V"]),
+                          help="How well this germ can invade the body and cause harm.")
     with sc2:
-        in_A = st.slider("AMR (A)", 0, 100, int(default_row["A"]))
+        in_A = st.slider("AMR (A)", 0, 100, int(default_row["A"]),
+                          help="How hard this germ is to treat with common antibiotics.")
     with sc3:
-        in_O = st.slider("Outbreak (O)", 0, 100, int(default_row["O"]))
+        in_O = st.slider("Outbreak (O)", 0, 100, int(default_row["O"]),
+                          help="How often this germ is linked to reported outbreaks.")
     with sc4:
-        in_P = st.slider("Persistence (P)", 0, 100, int(default_row["P"]))
+        in_P = st.slider("Persistence (P)", 0, 100, int(default_row["P"]),
+                          help="How long this germ survives on food or surfaces.")
     with sc5:
-        in_D = st.slider("Severity (D)", 0, 100, int(default_row["D"]))
+        in_D = st.slider("Severity (D)", 0, 100, int(default_row["D"]),
+                          help="How serious the illness tends to be.")
 
     raw_input = np.array([[in_V, in_A, in_O, in_P, in_D]], dtype=float)
+    scaled_input = scaler.transform(raw_input)  # the REAL fitted scaler
 
-    live1, live2, live3 = st.tabs(
-        ["① StandardScaler output", "② KMeans prediction", "③ Hierarchical: nearest match"]
-    )
+    st.markdown("### 🔮 Here's what the AI thinks")
+    km_pred = int(km_model.predict(scaled_input)[0])  # the REAL fitted KMeans model
+    pred_members = df[df["KMeans_Cluster"] == km_pred]
+    pred_center = pred_members[["V", "A", "O", "P", "D"]].mean()
+    pred_icon = CLUSTER_ICONS[km_pred % len(CLUSTER_ICONS)]
+    pred_label, pred_summary = describe_cluster(pred_center, overall_means, pred_icon)
+    st.success(f"{pred_icon} Your input belongs to the **“{pred_label}”** group")
+    st.write(pred_summary)
+    st.write(f"**Real pathogens already in this same group:** " + ", ".join(pred_members["name"]))
 
-    with live1:
-        scaled_input = scaler.transform(raw_input)  # the REAL fitted scaler
-        st.write("**Model used:** the same `StandardScaler` fitted on all 20 pathogens.")
+    dists = np.linalg.norm(Xs - scaled_input, axis=1)
+    nearest_idx = int(np.argmin(dists))
+    nearest_row = df.iloc[nearest_idx]
+    st.info(f"🧭 Out of all 20 real pathogens, the one your input is **most similar to** "
+            f"is **{nearest_row['name']}**.")
+
+    with st.expander("🔧 I'm technical — show me what's actually happening under the hood"):
+        st.write("**Step 1 — scaling:** the same `StandardScaler` fitted on all 20 pathogens "
+                 "transforms your 5 raw numbers so they're comparable:")
         st.dataframe(
             pd.DataFrame({
                 "Feature": ["V", "A", "O", "P", "D"],
@@ -1616,48 +1628,42 @@ with tab_model:
             }),
             hide_index=True, use_container_width=True,
         )
-        st.caption("Scaling makes every feature comparable before clustering — this is "
-                   "an exact live call to `scaler.transform()`, the same object used to "
-                   "build every chart in this dashboard.")
-
-    with live2:
-        km_pred = int(km_model.predict(scaled_input)[0])  # the REAL fitted KMeans model
-        pred_members = df[df["KMeans_Cluster"] == km_pred]
-        pred_center = pred_members[["V", "A", "O", "P", "D"]].mean()
-        pred_icon = CLUSTER_ICONS[km_pred % len(CLUSTER_ICONS)]
-        pred_label, pred_summary = describe_cluster(pred_center, overall_means, pred_icon)
-        st.write("**Model used:** the same `KMeans` model shown in the Clustering tab "
-                 f"(k={k}) — this calls `km_model.predict()` live.")
-        st.success(f"{pred_icon} Assigned to **Cluster #{km_pred} — “{pred_label}”**")
-        st.write(pred_summary)
-        st.write(f"**Pathogens already in this cluster:** " + ", ".join(pred_members["name"]))
-
-    with live3:
-        # AgglomerativeClustering has no .predict() for new points — that is a real
-        # mathematical limitation of hierarchical clustering, not a shortcut we're
-        # taking. The scientifically correct way to place a new point is to find its
-        # nearest already-clustered neighbor in the same scaled feature space.
-        dists = np.linalg.norm(Xs - scaled_input, axis=1)
-        nearest_idx = int(np.argmin(dists))
-        nearest_row = df.iloc[nearest_idx]
-        st.write("**Model used:** the same `AgglomerativeClustering` (Ward) model as "
-                 "the dendrogram — hierarchical clustering has no built-in way to place "
-                 "a brand-new point, so we report its nearest neighbor in the real "
-                 "trained feature space instead (a standard, correct approach for this "
-                 "limitation).")
-        st.success(
-            f"Closest existing match: **{nearest_row['name']}** "
-            f"(distance: {dists[nearest_idx]:.3f}) → "
-            f"Hierarchical cluster **#{int(nearest_row['Hierarchical_Cluster'])}**"
+        st.write(f"**Step 2 — KMeans:** `km_model.predict()` (k={k}) assigns cluster "
+                 f"**#{km_pred}** directly from the trained model object — not a lookup table.")
+        st.write("**Step 3 — Hierarchical:** `AgglomerativeClustering` has no built-in way to "
+                 "place a brand-new point (a real mathematical limitation, not a shortcut we "
+                 f"took), so we find the nearest neighbor in real trained feature space: "
+                 f"**{nearest_row['name']}** at distance **{dists[nearest_idx]:.3f}**, which "
+                 f"sits in hierarchical cluster **#{int(nearest_row['Hierarchical_Cluster'])}**.")
+        st.write(
+            "**Proof this is real:** set every slider above to exactly match an existing "
+            "pathogen's own V/A/O/P/D scores (see the **Compare All Pathogens** tab for the "
+            "numbers) — the prediction will always match that pathogen's actual assigned "
+            "cluster, because it's calling the identical fitted model, not a re-implementation."
         )
-        st.write(f"So your input would most plausibly sit in the same hierarchical "
-                 f"group as **{nearest_row['name']}**.")
+    st.caption("Want the full technical breakdown (model internals, downloadable files, "
+               "code)? See the **🤖 Model Details** tab.")
+
+# --- Model Details tab -----------------------------------------------------
+with tab_model:
+    st.info(
+        "🎓 **In simple terms:** this app takes each germ's 5 risk scores, "
+        "puts similar germs into the same group automatically (no human labeling), "
+        "and shows you *why* it grouped them that way. For a plain-language "
+        "explanation of what each group actually means, see the **🌐 Clustering** tab."
+    )
+    st.success(
+        "🧪 **Want to try the model yourself first?** Head to the **Try the Model** tab — "
+        "it's the same real trained model, with sliders, no jargon required. Everything "
+        "below here is the deep technical detail, for research/coursework."
+    )
 
     with st.expander("✅ Verify this is the real model (not a fake demo)"):
         st.write(
-            "Set every slider above to exactly match an existing pathogen's own V/A/O/P/D "
-            "scores (see the **Compare All Pathogens** tab for the numbers) — the KMeans "
-            "prediction above will always match that pathogen's actual assigned cluster, "
+            "Set every slider in the **Try the Model** tab to exactly match an existing "
+            "pathogen's own V/A/O/P/D scores (see the **Compare All Pathogens** tab for the "
+            "numbers) — the KMeans prediction will always match that pathogen's actual "
+            "assigned cluster, because it's calling the identical fitted model object, not "
             "because it's calling the identical fitted model object, not a re-implementation."
         )
 
@@ -1733,10 +1739,19 @@ with tab_model:
         download_df_button(loadings.reset_index(names="Feature"), "PCA loadings table",
                             "pca_loadings.csv", key="dl_loadings")
 
-    st.subheader("Download trained models")
-    import pickle, io, zipfile
+    st.success(
+        "✅ **If you just played with the sliders above, you're already done.** "
+        "You used the real model and got a real answer — nothing below this point "
+        "is required for that. The rest of this section is only for people who want "
+        "to keep using the model in their *own* code (developers, researchers, "
+        "students continuing this project)."
+    )
 
-    readme_text = f"""FoodSafe BioIntel — Trained Model Package
+    with st.expander("🔧 For developers & researchers: download the trained model files"):
+        st.subheader("Download trained models")
+        import pickle, io, zipfile
+
+        readme_text = f"""FoodSafe BioIntel — Trained Model Package
 ==========================================
 
 This ZIP contains the ACTUAL trained machine-learning models from the
@@ -1779,7 +1794,7 @@ were trained on.
 Generated by the FoodSafe BioIntel dashboard.
 """
 
-    example_script = f"""\"\"\"
+        example_script = f"""\"\"\"
 Example: load the trained FoodSafe BioIntel models and use them
 on a NEW pathogen's scores, without retraining anything.
 \"\"\"
@@ -1804,54 +1819,54 @@ print("(Hierarchical clustering does not support predicting new points directly 
 print(" it only describes the grouping of the original {len(df)} pathogens it was fit on.)")
 """
 
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("kmeans_model.pkl", pickle.dumps(km_model))
-        zf.writestr("hierarchical_model.pkl", pickle.dumps(hier_model))
-        zf.writestr("scaler.pkl", pickle.dumps(scaler))
-        zf.writestr("load_and_predict.py", example_script)
-        zf.writestr("README.txt", readme_text)
-    zip_buffer.seek(0)
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("kmeans_model.pkl", pickle.dumps(km_model))
+            zf.writestr("hierarchical_model.pkl", pickle.dumps(hier_model))
+            zf.writestr("scaler.pkl", pickle.dumps(scaler))
+            zf.writestr("load_and_predict.py", example_script)
+            zf.writestr("README.txt", readme_text)
+        zip_buffer.seek(0)
 
-    st.download_button(
-        "📦 Download All Models (ZIP, with instructions)",
-        data=zip_buffer.getvalue(),
-        file_name="foodsafe_bioint_models.zip",
-        mime="application/zip",
-        use_container_width=True,
-    )
-    st.caption(
-        "Recommended — includes all 3 trained models, a README, and a ready-to-run "
-        "Python script, so you're not stuck with an unopenable .pkl file."
-    )
-
-    with st.expander("⬇️ Or download the individual files separately (advanced)"):
-        st.warning(
-            "⚠️ These `.pkl` files can't be opened by double-clicking — they only "
-            "work when loaded with Python code (see the ZIP download above for a "
-            "ready-made example script)."
+        st.download_button(
+            "📦 Download All Models (ZIP, with instructions)",
+            data=zip_buffer.getvalue(),
+            file_name="foodsafe_bioint_models.zip",
+            mime="application/zip",
+            use_container_width=True,
         )
-        dl1, dl2, dl3 = st.columns(3)
-        with dl1:
-            st.download_button("⬇️ KMeans model (.pkl)", data=pickle.dumps(km_model),
-                                file_name="kmeans_model.pkl")
-        with dl2:
-            st.download_button("⬇️ Hierarchical model (.pkl)", data=pickle.dumps(hier_model),
-                                file_name="hierarchical_model.pkl")
-        with dl3:
-            st.download_button("⬇️ StandardScaler (.pkl)", data=pickle.dumps(scaler),
-                                file_name="scaler.pkl")
-
-        st.subheader("Reproducibility snippet")
-        st.code(
-            "from sklearn.preprocessing import StandardScaler\n"
-            "from sklearn.cluster import KMeans, AgglomerativeClustering\n\n"
-            "X = df[['V','A','O','P','D']].values\n"
-            "Xs = StandardScaler().fit_transform(X)\n"
-            f"km = KMeans(n_clusters={k}, n_init=10, random_state=42).fit(Xs)\n"
-            f"hier = AgglomerativeClustering(n_clusters={k}, linkage='ward').fit(Xs)",
-            language="python",
+        st.caption(
+            "Recommended — includes all 3 trained models, a README, and a ready-to-run "
+            "Python script, so you're not stuck with an unopenable .pkl file."
         )
+
+        with st.expander("⬇️ Or download the individual files separately (even more advanced)"):
+            st.warning(
+                "⚠️ These `.pkl` files can't be opened by double-clicking — they only "
+                "work when loaded with Python code (see the ZIP download above for a "
+                "ready-made example script)."
+            )
+            dl1, dl2, dl3 = st.columns(3)
+            with dl1:
+                st.download_button("⬇️ KMeans model (.pkl)", data=pickle.dumps(km_model),
+                                    file_name="kmeans_model.pkl")
+            with dl2:
+                st.download_button("⬇️ Hierarchical model (.pkl)", data=pickle.dumps(hier_model),
+                                    file_name="hierarchical_model.pkl")
+            with dl3:
+                st.download_button("⬇️ StandardScaler (.pkl)", data=pickle.dumps(scaler),
+                                    file_name="scaler.pkl")
+
+            st.subheader("Reproducibility snippet")
+            st.code(
+                "from sklearn.preprocessing import StandardScaler\n"
+                "from sklearn.cluster import KMeans, AgglomerativeClustering\n\n"
+                "X = df[['V','A','O','P','D']].values\n"
+                "Xs = StandardScaler().fit_transform(X)\n"
+                f"km = KMeans(n_clusters={k}, n_init=10, random_state=42).fit(Xs)\n"
+                f"hier = AgglomerativeClustering(n_clusters={k}, linkage='ward').fit(Xs)",
+                language="python",
+            )
 
 # --- Manual & Sources tab ---------------------------------------------------
 with tab_manual:
